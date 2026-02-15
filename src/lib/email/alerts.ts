@@ -1,7 +1,12 @@
 import { Resend } from 'resend'
 import { createClient } from '@/lib/supabase/server'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+// Lazy-initialize so module load doesn't throw when key is absent at build time
+function getResend() {
+  const key = process.env.RESEND_API_KEY
+  if (!key || key === 're_placeholder') return null
+  return new Resend(key)
+}
 
 const FROM = process.env.ALERT_FROM_EMAIL ?? 'onboarding@resend.dev'
 
@@ -48,30 +53,36 @@ export async function checkAndSendBudgetAlerts(
   const budgetWithCat = budget as unknown as { categories?: { name: string } | null }
   const categoryName = budgetWithCat.categories?.name ?? 'a category'
 
+  const resend = getResend()
+
   if (pct >= 1 && !budget.alert_sent_100) {
-    await resend.emails.send({
-      from: FROM,
-      to: user.email,
-      subject: `Budget limit reached: ${categoryName}`,
-      html: `
-        <p>You have reached <strong>100%</strong> of your monthly budget for <strong>${categoryName}</strong>.</p>
-        <p>Limit: ${budget.monthly_limit} | Spent: ${spent.toFixed(2)}</p>
-      `,
-    })
+    if (resend) {
+      await resend.emails.send({
+        from: FROM,
+        to: user.email,
+        subject: `Budget limit reached: ${categoryName}`,
+        html: `
+          <p>You have reached <strong>100%</strong> of your monthly budget for <strong>${categoryName}</strong>.</p>
+          <p>Limit: ${budget.monthly_limit} | Spent: ${spent.toFixed(2)}</p>
+        `,
+      })
+    }
     await supabase
       .from('budgets')
       .update({ alert_sent_100: true })
       .eq('id', budget.id)
   } else if (pct >= 0.8 && !budget.alert_sent_80) {
-    await resend.emails.send({
-      from: FROM,
-      to: user.email,
-      subject: `Budget 80% warning: ${categoryName}`,
-      html: `
-        <p>You have used <strong>80%</strong> of your monthly budget for <strong>${categoryName}</strong>.</p>
-        <p>Limit: ${budget.monthly_limit} | Spent: ${spent.toFixed(2)}</p>
-      `,
-    })
+    if (resend) {
+      await resend.emails.send({
+        from: FROM,
+        to: user.email,
+        subject: `Budget 80% warning: ${categoryName}`,
+        html: `
+          <p>You have used <strong>80%</strong> of your monthly budget for <strong>${categoryName}</strong>.</p>
+          <p>Limit: ${budget.monthly_limit} | Spent: ${spent.toFixed(2)}</p>
+        `,
+      })
+    }
     await supabase
       .from('budgets')
       .update({ alert_sent_80: true })
